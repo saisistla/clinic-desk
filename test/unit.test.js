@@ -1,195 +1,157 @@
 import assert from 'assert';
-import { execSync } from 'child_process';
-import fs from 'fs';
+import { describe, it, beforeEach } from 'node:test';
+import fs from 'fs/promises';
 import path from 'path';
-import http from 'http';
-import { before, after, describe, it } from 'node:test';
+import { exec } from 'child_process';
 
-const appPath = path.resolve('./src/app.js');
-const fixturesPath = path.resolve('./fixtures/data.json');
+const FIXTURE_PATH = path.resolve('./fixtures/data.json');
 
-// Helper to start the server as a child process
-function startServer() {
-  const server = execSync('node src/app.js', { stdio: 'pipe' });
-  return server;
+// Helper to reset fixture data before each test
+async function resetFixture() {
+  const initialData = [
+    {
+      "id": "a1",
+      "patient": "John Doe",
+      "time": "09:00",
+      "date": new Date().toISOString().slice(0,10),
+      "status": "booked"
+    },
+    {
+      "id": "a2",
+      "patient": "Jane Smith",
+      "time": "09:30",
+      "date": new Date().toISOString().slice(0,10),
+      "status": "booked"
+    }
+  ];
+  await fs.writeFile(FIXTURE_PATH, JSON.stringify(initialData, null, 2));
 }
 
-// We will spawn the app as a child process and test its REST API
-// But node --test runs in a single process, so we spawn the app in a separate process
+// Helper to run backend commands via curl
+function request(method, endpoint, data) {
+  return new Promise((resolve, reject) => {
+    const curl = [
+      'curl',
+      '-s',
+      '-X', method,
+      'http://localhost:3000' + endpoint,
+      '-H', 'Content-Type: application/json'
+    ];
+    if (data) {
+      curl.push('-d', JSON.stringify(data));
+    }
+    exec(curl.join(' '), (error, stdout, stderr) => {
+      if (error) return reject(error);
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve(stdout);
+      }
+    });
+  });
+}
 
-import fetch from 'node-fetch';
-
-// We assume the app listens on port 3000
-const BASE_URL = 'http://localhost:3000';
-
+// Start backend server before tests
 let serverProcess;
-
-// Utility to wait for server to be ready
-async function waitForServerReady() {
-  for (let i = 0; i < 20; i++) {
-    try {
-      const res = await fetch(`${BASE_URL}/health`);
-      if (res.ok) return;
-    } catch {}
-    await new Promise(r => setTimeout(r, 200));
-  }
-  throw new Error('Server did not start in time');
-}
-
-// Backup original fixture data
-let originalFixtureData;
-
-before(async () => {
-  // Backup fixture
-  originalFixtureData = fs.readFileSync(fixturesPath, 'utf-8');
-
-  // Start the server as a child process
-  serverProcess = execSync('node src/app.js', { stdio: 'pipe' });
-
-  // Instead of execSync, we spawn the app in a child process
-  // But node:test does not support async spawn easily, so we do a workaround
-  // We'll spawn the app in a separate process using child_process.spawn
-  const { spawn } = await import('child_process');
-  serverProcess = spawn('node', ['src/app.js'], { stdio: ['ignore', 'pipe', 'pipe'] });
-
-  // Wait for server ready
-  await waitForServerReady();
+beforeEach(async () => {
+  await resetFixture();
 });
-
-after(() => {
-  // Restore fixture
-  fs.writeFileSync(fixturesPath, originalFixtureData, 'utf-8');
-  if (serverProcess) {
-    serverProcess.kill();
-  }
-});
-
-// Helper to read today's appointments from fixture
-function getTodayAppointments() {
-  const data = JSON.parse(fs.readFileSync(fixturesPath, 'utf-8'));
-  const today = new Date().toISOString().slice(0, 10);
-  return data.appointments.filter(a => a.date === today && !a.canceled);
-}
-
-// Tests
 
 describe('Clinic Front-Desk Appointment App', () => {
+  beforeEach((done) => {
+    if (serverProcess) {
+      serverProcess.kill();
+    }
+    serverProcess = exec('node src/app.js');
+    // Wait for server to start
+    setTimeout(done, 1000);
+  });
+
+  after(() => {
+    if (serverProcess) serverProcess.kill();
+  });
+
   it('should fetch today\'s appointments', async () => {
-    const res = await fetch(`${BASE_URL}/appointments/today`);
-    assert.strictEqual(res.status, 200);
-    const json = await res.json();
-    assert.ok(Array.isArray(json));
-    // All appointments must be for today and not canceled
-    const today = new Date().toISOString().slice(0, 10);
-    for (const appt of json) {
-      assert.strictEqual(appt.date, today);
-      assert.strictEqual(appt.canceled, false);
-      assert.ok(appt.patient);
-      assert.ok(appt.slot);
+    const today = new Date().toISOString().slice(0,10);
+    const res = await request('GET', `/appointments?date=${today}`);
+    assert(Array.isArray(res));
+    assert(res.length >= 2);
+    assert(res.every(a => a.date === today));
+    assert(res.some(a => a.patient === 'John Doe'));
+  });
+
+  it('should book a new appointment in a free 30-min slot', async () => {
+    const today = new Date().toISOString().slice(0,10);
+    const newAppointment = {
+      patient: 'Alice Wonderland',
+      date: today,
+      time: '10:00'
+    };
+    const res = await request('POST', '/appointments', newAppointment);
+    assert.strictEqual(res.patient, newAppointment.patient);
+    assert.strictEqual(res.date, newAppointment.date);
+    assert.strictEqual(res.time, newAppointment.time);
+    assert(res.id);
+
+    // Confirm it appears in today's appointments
+    const all = await request('GET', `/appointments?date=${today}`);
+    assert(all.find(a => a.id === res.id));
+  });
+
+  it('should reject booking overlapping appointment', async () => {
+    const today = new Date().toISOString().slice(0,10);
+    // Overlaps with 09:00-09:30 slot
+    const overlap = {
+      patient: 'Bob Overlap',
+      date: today,
+      time: '09:15'
+    };
+    try {
+      await request('POST', '/appointments', overlap);
+      assert.fail('Should have thrown error for overlapping slot');
+    } catch (e) {
+      // curl returns empty or error, so test backend returns error JSON
+      // We expect JSON with error property
+      const err = JSON.parse(e.message.match(/\{.*\}/s)[0]);
+      assert(err.error.includes('overlapping'));
     }
   });
 
-  it('should book a new appointment slot for a patient', async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    // Find a free slot (e.g. 09:00) that is not booked
-    const existing = getTodayAppointments();
-    const bookedSlots = new Set(existing.map(a => a.slot));
-    const candidateSlots = ['09:00', '09:30', '10:00', '10:30', '11:00'];
-    const freeSlot = candidateSlots.find(s => !bookedSlots.has(s));
-    assert.ok(freeSlot, 'No free slot available for test');
-
-    const newBooking = {
-      patient: 'Test Patient',
-      date: today,
-      slot: freeSlot
-    };
-
-    const res = await fetch(`${BASE_URL}/appointments/book`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newBooking)
-    });
-    assert.strictEqual(res.status, 201);
-    const json = await res.json();
-    assert.strictEqual(json.patient, newBooking.patient);
-    assert.strictEqual(json.date, newBooking.date);
-    assert.strictEqual(json.slot, newBooking.slot);
-    assert.strictEqual(json.canceled, false);
-
-    // Verify it appears in today's appointments
-    const res2 = await fetch(`${BASE_URL}/appointments/today`);
-    const appts = await res2.json();
-    assert.ok(appts.find(a => a.patient === newBooking.patient && a.slot === newBooking.slot));
-  });
-
-  it('should not allow booking overlapping slots', async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    // Book a slot first
-    const slot = '11:30';
-    const booking1 = { patient: 'Overlap Test 1', date: today, slot };
-    const res1 = await fetch(`${BASE_URL}/appointments/book`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(booking1)
-    });
-    assert.strictEqual(res1.status, 201);
-
-    // Try to book same slot again
-    const booking2 = { patient: 'Overlap Test 2', date: today, slot };
-    const res2 = await fetch(`${BASE_URL}/appointments/book`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(booking2)
-    });
-    assert.strictEqual(res2.status, 409); // Conflict
-  });
-
   it('should cancel an existing appointment', async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    // Book a slot to cancel
-    const slot = '12:00';
-    const booking = { patient: 'Cancel Test', date: today, slot };
-    const resBook = await fetch(`${BASE_URL}/appointments/book`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(booking)
-    });
-    assert.strictEqual(resBook.status, 201);
-    const bookedAppt = await resBook.json();
+    const today = new Date().toISOString().slice(0,10);
+    // Cancel John Doe's appointment (id a1)
+    const res = await request('DELETE', '/appointments/a1');
+    assert.strictEqual(res.message, 'Appointment cancelled');
 
-    // Cancel it
-    const resCancel = await fetch(`${BASE_URL}/appointments/cancel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: bookedAppt.id })
-    });
-    assert.strictEqual(resCancel.status, 200);
-    const cancelJson = await resCancel.json();
-    assert.strictEqual(cancelJson.canceled, true);
-
-    // Verify it no longer appears in today's appointments
-    const resToday = await fetch(`${BASE_URL}/appointments/today`);
-    const appts = await resToday.json();
-    assert.ok(!appts.find(a => a.id === bookedAppt.id));
+    // Confirm it is removed from today's appointments
+    const all = await request('GET', `/appointments?date=${today}`);
+    assert(!all.find(a => a.id === 'a1'));
   });
 
-  it('should reject booking with invalid slot format', async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const badBooking = { patient: 'Bad Slot', date: today, slot: '25:00' };
-    const res = await fetch(`${BASE_URL}/appointments/book`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(badBooking)
-    });
-    assert.strictEqual(res.status, 400);
+  it('should reject cancelling non-existing appointment', async () => {
+    try {
+      await request('DELETE', '/appointments/nonexistent');
+      assert.fail('Should have thrown error for non-existing appointment');
+    } catch (e) {
+      const err = JSON.parse(e.message.match(/\{.*\}/s)[0]);
+      assert(err.error.includes('not found'));
+    }
   });
 
-  it('should reject canceling non-existent appointment', async () => {
-    const res = await fetch(`${BASE_URL}/appointments/cancel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 'non-existent-id' })
-    });
-    assert.strictEqual(res.status, 404);
+  it('should enforce 30-minute slot duration on booking', async () => {
+    const today = new Date().toISOString().slice(0,10);
+    // Invalid time slot (not on 30-min boundary)
+    const invalidSlot = {
+      patient: 'Charlie Invalid',
+      date: today,
+      time: '10:10'
+    };
+    try {
+      await request('POST', '/appointments', invalidSlot);
+      assert.fail('Should have thrown error for invalid slot duration');
+    } catch (e) {
+      const err = JSON.parse(e.message.match(/\{.*\}/s)[0]);
+      assert(err.error.includes('30-minute slot'));
+    }
   });
 });
