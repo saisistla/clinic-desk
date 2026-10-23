@@ -32,11 +32,13 @@ function minutes(value) {
 }
 
 function normalize(row) {
+  const patient = row.patient && typeof row.patient === "object" ? row.patient : {};
   return {
     id: String(row.id),
-    patientName: row.patientName || row.patient || row.name || "",
+    patientName: row.patientName || patient.name || row.patient || row.name || "",
+    patientSurname: row.patientSurname || row.surname || patient.surname || "",
     time: row.time || (row.datetime ? new Date(row.datetime).toISOString().slice(11, 16) : ""),
-    date: row.date || today(),
+    date: row.date || (row.time && String(row.time).includes("T") ? String(row.time).slice(0, 10) : today()),
   };
 }
 
@@ -68,7 +70,8 @@ export function handle(req, res) {
     req.on("end", () => {
       try {
         const body = raw ? JSON.parse(raw) : {};
-        const patientName = String(body.patientName || body.patient || "").trim();
+        const patientName = String(body.patientName || body.firstName || body.patient || "").trim();
+        const patientSurname = String(body.patientSurname || body.surname || "").trim();
         const time = body.time || (body.datetime ? new Date(body.datetime).toISOString().slice(11, 16) : "");
         const date = body.date || today();
         if (!patientName || !time) return send(res, 400, { error: "Missing patientName or time" });
@@ -76,7 +79,15 @@ export function handle(req, res) {
         const rows = load();
         const clash = rows.map(normalize).some((row) => row.date === date && Math.abs(minutes(row.time) - minutes(time)) < 30);
         if (clash) return send(res, 409, { error: "overlapping slot" });
-        const created = { id: Date.now().toString(), patientName, patient: patientName, time, date };
+        const created = {
+          id: Date.now().toString(),
+          patientName,
+          patientSurname,
+          surname: patientSurname,
+          patient: { name: patientName, surname: patientSurname },
+          time,
+          date,
+        };
         rows.push(created);
         save(rows);
         return send(res, 201, created);
