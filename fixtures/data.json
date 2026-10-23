@@ -2,15 +2,39 @@
   "appointments": [
     {
       "id": "a1",
-      "patient": "John Doe",
-      "time": "09:00",
-      "date": "2026-10-23"
+      "patient": {
+        "name": "John",
+        "surname": "Doe"
+      },
+      "time": "2024-06-01T09:00:00Z",
+      "status": "booked"
     },
     {
       "id": "a2",
-      "patient": "Jane Smith",
-      "time": "09:30",
-      "date": "2026-10-23"
+      "patient": {
+        "name": "Jane",
+        "surname": "Smith"
+      },
+      "time": "2024-06-01T10:00:00Z",
+      "status": "booked"
+    },
+    {
+      "id": "a3",
+      "patient": {
+        "name": "Alice",
+        "surname": "Johnson"
+      },
+      "time": "2024-06-01T11:00:00Z",
+      "status": "cancelled"
+    },
+    {
+      "id": "a4",
+      "patient": {
+        "name": "Bob",
+        "surname": "Brown"
+      },
+      "time": "2024-06-01T12:00:00Z",
+      "status": "booked"
     }
   ]
 }
