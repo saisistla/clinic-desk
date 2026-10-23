@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clinic Front Desk - Appointments</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+    }
+    #appointments {
+      margin-bottom: 30px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+      background: #fff;
+      padding: 15px;
+      border-radius: 6px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #2980b9;
+      color: white;
+    }
+    button.cancel-btn {
+      background-color: #e74c3c;
+      border: none;
+      color: white;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    button.cancel-btn:hover {
+      background-color: #c0392b;
+    }
+    #booking-form {
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 6px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    #booking-form label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+    #booking-form input[type="text"],
+    #booking-form input[type="time"] {
+      width: 100%;
+      padding: 8px 10px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 1em;
+    }
+    #booking-form button {
+      background-color: #27ae60;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      font-size: 1em;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #booking-form button:hover {
+      background-color: #1e8449;
+    }
+    #message {
+      max-width: 600px;
+      margin: 15px auto;
+      padding: 10px 15px;
+      border-radius: 4px;
+      font-weight: bold;
+      display: none;
+    }
+    #message.success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    #message.error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+  </style>
+</head>
+<body>
+  <h1>Clinic Front Desk - Today's Appointments</h1>
+  <section id="appointments">
+    <table aria-label="Today's appointments">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Patient Name</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="appointments-list">
+        <tr><td colspan="3">Loading appointments...</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="booking-form">
+    <h2>Book New Appointment</h2>
+    <form id="form-book">
+      <label for="patientName">Patient Name</label>
+      <input type="text" id="patientName" name="patientName" required autocomplete="off" />
+
+      <label for="appointmentTime">Appointment Time</label>
+      <input type="time" id="appointmentTime" name="appointmentTime" required step="1800" min="08:00" max="17:30" />
+      <small>Slots are 30 minutes from 08:00 to 18:00</small>
+
+      <button type="submit">Book Appointment</button>
+    </form>
+  </section>
+
+  <div id="message" role="alert" aria-live="polite"></div>
+
+  <script>
+    const appointmentsList = document.getElementById('appointments-list');
+    const messageBox = document.getElementById('message');
+    const formBook = document.getElementById('form-book');
+
+    // Format time string HH:mm to 12h format
+    function formatTime24to12(time24) {
+      const [hourStr, min] = time24.split(':');
+      let hour = parseInt(hourStr, 10);
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      hour = hour % 12 || 12;
+      return hour + ':' + min + ' ' + ampm;
+    }
+
+    // Show message
+    function showMessage(text, type = 'success') {
+      messageBox.textContent = text;
+      messageBox.className = '';
+      messageBox.classList.add(type);
+      messageBox.style.display = 'block';
+      setTimeout(() => {
+        messageBox.style.display = 'none';
+      }, 4000);
+    }
+
+    // Fetch and render today's appointments
+    async function loadAppointments() {
+      appointmentsList.innerHTML = '<tr><td colspan="3">Loading appointments...</td></tr>';
+      try {
+        const res = await fetch('/api/appointments/today');
+        if (!res.ok) throw new Error('Failed to fetch appointments');
+        const data = await res.json();
+        if (data.length === 0) {
+          appointmentsList.innerHTML = '<tr><td colspan="3">No appointments for today.</td></tr>';
+          return;
+        }
+        appointmentsList.innerHTML = '';
+        data.forEach(appointment => {
+          const tr = document.createElement('tr');
+          const timeTd = document.createElement('td');
+          timeTd.textContent = formatTime24to12(appointment.time);
+          const nameTd = document.createElement('td');
+          nameTd.textContent = appointment.patientName;
+          const actionTd = document.createElement('td');
+          const cancelBtn = document.createElement('button');
+          cancelBtn.textContent = 'Cancel';
+          cancelBtn.className = 'cancel-btn';
+          cancelBtn.setAttribute('aria-label', `Cancel appointment for ${appointment.patientName} at ${formatTime24to12(appointment.time)}`);
+          cancelBtn.onclick = () => cancelAppointment(appointment.id);
+          actionTd.appendChild(cancelBtn);
+
+          tr.appendChild(timeTd);
+          tr.appendChild(nameTd);
+          tr.appendChild(actionTd);
+          appointmentsList.appendChild(tr);
+        });
+      } catch (err) {
+        appointmentsList.innerHTML = '<tr><td colspan="3">Error loading appointments.</td></tr>';
+        showMessage('Error loading appointments: ' + err.message, 'error');
+      }
+    }
+
+    // Cancel appointment by id
+    async function cancelAppointment(id) {
+      if (!confirm('Are you sure you want to cancel this appointment?')) return;
+      try {
+        const res = await fetch(`/api/appointments/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to cancel appointment');
+        }
+        showMessage('Appointment canceled successfully.');
+        loadAppointments();
+      } catch (err) {
+        showMessage('Error canceling appointment: ' + err.message, 'error');
+      }
+    }
+
+    // Book new appointment
+    formBook.addEventListener('submit', async e => {
+      e.preventDefault();
+      const patientName = formBook.patientName.value.trim();
+      const appointmentTime = formBook.appointmentTime.value;
+
+      if (!patientName || !appointmentTime) {
+        showMessage('Please fill in all fields.', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patientName, time: appointmentTime })
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.message || 'Failed to book appointment');
+        }
+        showMessage('Appointment booked successfully.');
+        formBook.reset();
+        loadAppointments();
+      } catch (err) {
+        showMessage('Error booking appointment: ' + err.message, 'error');
+      }
+    });
+
+    // Initialize
+    loadAppointments();
+  </script>
+</body>
+</html>
