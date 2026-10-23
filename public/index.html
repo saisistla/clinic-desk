@@ -1,92 +1,52 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Front Desk Appointments</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; }
-  table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-  th { background: #f4f4f4; }
-  form > div { margin-bottom: 10px; }
-  label { display: inline-block; width: 100px; }
-  input[type=text], input[type=date] { width: 200px; padding: 5px; }
-  button { padding: 6px 12px; }
-</style>
+  <meta charset="utf-8" />
+  <title>Clinic front desk</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 24px; color: #142033; }
+    table { border-collapse: collapse; width: 100%; margin: 16px 0 24px; }
+    th, td { border: 1px solid #c5d5da; padding: 8px 10px; text-align: left; }
+    th { background: #0a585c; color: #fff; }
+    form { display: grid; gap: 10px; max-width: 360px; }
+    button { width: fit-content; }
+  </style>
 </head>
 <body>
-<h1>Appointments</h1>
-<table id="appointments">
-  <thead>
-    <tr><th>ID</th><th>First Name</th><th>Surname</th><th>Date</th><th>Action</th></tr>
-  </thead>
-  <tbody></tbody>
-</table>
-<h2>Book Appointment</h2>
-<form id="bookingForm">
-  <div><label for="firstName">First Name:</label><input type="text" id="firstName" name="firstName" required /></div>
-  <div><label for="surname">Surname:</label><input type="text" id="surname" name="surname" required /></div>
-  <div><label for="date">Date:</label><input type="date" id="date" name="date" required /></div>
-  <button type="submit">Book</button>
-</form>
-<script>
-const appointmentsTableBody = document.querySelector('#appointments tbody');
-const bookingForm = document.getElementById('bookingForm');
-
-async function fetchAppointments() {
-  const res = await fetch('/api/appointment-table-shows-surn');
-  if (!res.ok) return;
-  const data = await res.json();
-  appointmentsTableBody.innerHTML = '';
-  data.forEach(app => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${app.id}</td>
-      <td>${app.firstName}</td>
-      <td>${app.surname}</td>
-      <td>${app.date}</td>
-      <td><button data-id="${app.id}">Cancel</button></td>
-    `;
-    appointmentsTableBody.appendChild(tr);
-  });
-}
-
-appointmentsTableBody.addEventListener('click', async e => {
-  if (e.target.tagName === 'BUTTON') {
-    const id = e.target.getAttribute('data-id');
-    const res = await fetch(`/api/cancel-and-today-s-list-stil/${id}`, { method: 'DELETE' });
-    if (res.ok) fetchAppointments();
-  }
-});
-
-bookingForm.addEventListener('submit', async e => {
-  e.preventDefault();
-  const firstName = bookingForm.firstName.value.trim();
-  const surname = bookingForm.surname.value.trim();
-  const date = bookingForm.date.value;
-  if (!firstName || !surname || !date) return alert('All fields are required.');
-  const res = await fetch('/api/booking-form-collects-surnam');
-  if (!res.ok) return alert('Booking form API error');
-  const bookingData = { firstName, surname, date };
-  const postRes = await fetch('/api/booking-form-collects-surnam', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(bookingData)
-  });
-  if (postRes.ok) {
-    bookingForm.reset();
-    fetchAppointments();
-  } else {
-    alert('Failed to book appointment');
-  }
-});
-
-(async () => {
-  const health = await fetch('/health');
-  if (!health.ok) alert('API health check failed');
-  fetchAppointments();
-})();
-</script>
+  <h1>Clinic front desk</h1>
+  <table>
+    <thead><tr><th>Time</th><th>Patient</th><th>Surname</th><th>Action</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <h2>Book an appointment</h2>
+  <form id="book">
+    <label>Patient name <input name="patientName" required /></label>
+    <label>Surname <input name="patientSurname" /></label>
+    <label>Time (30-minute slots) <input name="time" type="time" step="1800" required /></label>
+    <button type="submit">Book appointment</button>
+  </form>
+  <script>
+    async function load() {
+      const res = await fetch("/api/appointments/today");
+      const rows = await res.json();
+      document.getElementById("rows").innerHTML = rows.map((row) =>
+        "<tr><td>" + (row.time || "") + "</td><td>" + (row.patientName || "") + "</td><td>" + (row.patientSurname || row.surname || "") + "</td><td><button data-id='" + row.id + "'>Cancel</button></td></tr>"
+      ).join("");
+    }
+    document.getElementById("rows").addEventListener("click", async (event) => {
+      const id = event.target && event.target.dataset && event.target.dataset.id;
+      if (!id) return;
+      await fetch("/api/appointments/cancel/" + id, { method: "DELETE" });
+      load();
+    });
+    document.getElementById("book").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target));
+      await fetch("/api/appointments/book", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+      event.target.reset();
+      load();
+    });
+    fetch("/health").then(() => load());
+  </script>
 </body>
 </html>
