@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clinic Front Desk - Appointments</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
+    h1 { color: #2c3e50; }
+    #appointments { margin-bottom: 30px; }
+    table { border-collapse: collapse; width: 100%; max-width: 600px; background: white; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #3498db; color: white; }
+    tr:nth-child(even) { background-color: #f2f2f2; }
+    button { background-color: #e74c3c; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 3px; }
+    button:hover { background-color: #c0392b; }
+    form { background: white; padding: 15px; max-width: 600px; border-radius: 5px; box-shadow: 0 0 5px #ccc; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input[type=text], input[type=time] { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; }
+    input[type=submit] { margin-top: 15px; background-color: #27ae60; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 3px; font-size: 16px; }
+    input[type=submit]:hover { background-color: #1e8449; }
+    #message { margin-top: 15px; font-weight: bold; }
+    #message.error { color: #e74c3c; }
+    #message.success { color: #27ae60; }
+  </style>
+</head>
+<body>
+  <h1>Clinic Front Desk - Today's Appointments</h1>
+  <section id="appointments">
+    <table aria-label="Today's appointments">
+      <thead>
+        <tr>
+          <th>Time Slot</th>
+          <th>Patient Name</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="appointments-body">
+        <tr><td colspan="3">Loading appointments...</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="booking">
+    <h2>Book an Appointment</h2>
+    <form id="booking-form">
+      <label for="patientName">Patient Name</label>
+      <input type="text" id="patientName" name="patientName" required autocomplete="off" />
+
+      <label for="timeSlot">Time Slot (30-minute intervals)</label>
+      <input type="time" id="timeSlot" name="timeSlot" step="1800" required min="08:00" max="17:30" />
+
+      <input type="submit" value="Book Appointment" />
+    </form>
+    <div id="message" role="alert" aria-live="polite"></div>
+  </section>
+
+  <script>
+    const appointmentsBody = document.getElementById('appointments-body');
+    const bookingForm = document.getElementById('booking-form');
+    const messageDiv = document.getElementById('message');
+
+    // Fetch and display today's appointments
+    async function loadAppointments() {
+      try {
+        const res = await fetch('/api/appointments/today');
+        if (!res.ok) throw new Error('Failed to load appointments');
+        const appointments = await res.json();
+
+        if (appointments.length === 0) {
+          appointmentsBody.innerHTML = '<tr><td colspan="3">No appointments for today.</td></tr>';
+          return;
+        }
+
+        appointmentsBody.innerHTML = '';
+        appointments.forEach(app => {
+          const tr = document.createElement('tr');
+          const timeTd = document.createElement('td');
+          const patientTd = document.createElement('td');
+          const actionTd = document.createElement('td');
+
+          timeTd.textContent = app.time;
+          patientTd.textContent = app.patientName;
+
+          const cancelBtn = document.createElement('button');
+          cancelBtn.textContent = 'Cancel';
+          cancelBtn.setAttribute('aria-label', `Cancel appointment for ${app.patientName} at ${app.time}`);
+          cancelBtn.addEventListener('click', () => cancelAppointment(app.id));
+
+          actionTd.appendChild(cancelBtn);
+
+          tr.appendChild(timeTd);
+          tr.appendChild(patientTd);
+          tr.appendChild(actionTd);
+
+          appointmentsBody.appendChild(tr);
+        });
+      } catch (error) {
+        appointmentsBody.innerHTML = `<tr><td colspan="3">Error loading appointments.</td></tr>`;
+        showMessage(error.message, true);
+      }
+    }
+
+    // Show message
+    function showMessage(msg, isError = false) {
+      messageDiv.textContent = msg;
+      messageDiv.className = isError ? 'error' : 'success';
+      setTimeout(() => {
+        messageDiv.textContent = '';
+        messageDiv.className = '';
+      }, 5000);
+    }
+
+    // Book appointment handler
+    bookingForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const patientName = bookingForm.patientName.value.trim();
+      const timeSlot = bookingForm.timeSlot.value;
+
+      if (!patientName || !timeSlot) {
+        showMessage('Please fill in all fields.', true);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/appointments/book', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patientName, time: timeSlot })
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Booking failed');
+
+        showMessage('Appointment booked successfully.');
+        bookingForm.reset();
+        loadAppointments();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    // Cancel appointment
+    async function cancelAppointment(id) {
+      if (!confirm('Are you sure you want to cancel this appointment?')) return;
+      try {
+        const res = await fetch(`/api/appointments/cancel/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Cancel failed');
+
+        showMessage('Appointment canceled successfully.');
+        loadAppointments();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    }
+
+    // Initial load
+    loadAppointments();
+  </script>
+</body>
+</html>
