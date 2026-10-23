@@ -2,24 +2,15 @@
   "appointments": [
     {
       "id": "a1",
-      "patientName": "John Doe",
-      "startTime": "2024-06-20T09:00:00.000Z",
-      "endTime": "2024-06-20T09:30:00.000Z",
-      "status": "booked"
+      "patient": "John Doe",
+      "time": "09:00",
+      "date": "2026-10-23"
     },
     {
       "id": "a2",
-      "patientName": "Jane Smith",
-      "startTime": "2024-06-20T10:00:00.000Z",
-      "endTime": "2024-06-20T10:30:00.000Z",
-      "status": "booked"
-    },
-    {
-      "id": "a3",
-      "patientName": "Bob Johnson",
-      "startTime": "2024-06-20T11:30:00.000Z",
-      "endTime": "2024-06-20T12:00:00.000Z",
-      "status": "booked"
+      "patient": "Jane Smith",
+      "time": "09:30",
+      "date": "2026-10-23"
     }
   ]
 }
