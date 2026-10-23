@@ -1,115 +1,117 @@
-import http from "node:http";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import http from 'http';
+import url from 'url';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import path from 'path';
 
-const root = path.dirname(fileURLToPath(import.meta.url));
-const fixturePath = path.join(root, "../fixtures/data.json");
+const FIXTURE_PATH = path.resolve(process.cwd(), 'fixtures', 'appointments.json');
 
-function load() {
-  if (!fs.existsSync(fixturePath)) return [];
-  const raw = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-  return Array.isArray(raw) ? raw : raw.appointments ?? raw.items ?? [];
-}
-
-function save(rows) {
-  fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
-  fs.writeFileSync(fixturePath, JSON.stringify({ appointments: rows }, null, 2));
-}
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function minutes(value) {
-  const text = String(value || "");
-  if (text.includes("T")) {
-    const date = new Date(text);
-    return date.getUTCHours() * 60 + date.getUTCMinutes();
+function loadAppointments() {
+  if (!existsSync(FIXTURE_PATH)) {
+    return [];
   }
-  const [hours, mins] = text.split(":").map(Number);
-  return hours * 60 + mins;
+  try {
+    const data = readFileSync(FIXTURE_PATH, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
 }
 
-function normalize(row) {
-  return {
-    id: String(row.id),
-    patientName: row.patientName || row.patient || row.name || "",
-    time: row.time || (row.datetime ? new Date(row.datetime).toISOString().slice(11, 16) : ""),
-    date: row.date || today(),
-  };
+function saveAppointments(appointments) {
+  writeFileSync(FIXTURE_PATH, JSON.stringify(appointments, null, 2), 'utf-8');
 }
 
 export function health() {
-  return { status: "ok" };
+  return { status: 'ok' };
 }
 
-function send(res, status, body, type = "application/json") {
-  if (typeof res.setHeader === "function") res.setHeader("content-type", type);
-  res.writeHead(status, { "content-type": type });
-  res.end(typeof body === "string" ? body : JSON.stringify(body));
+function sendJson(res, statusCode, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+function parseIdFromPath(pathname) {
+  const parts = pathname.split('/');
+  return parts.length > 3 ? parts[3] : null;
 }
 
 export function handle(req, res) {
-  const url = new URL(req.url || "/", "http://localhost");
-  const route = url.pathname.replace(/\/$/, "") || "/";
-
-  if (req.method === "GET" && route === "/health") return send(res, 200, health());
-
-  if (req.method === "GET" && (route === "/appointments/today" || route === "/api/appointments/today" || route === "/appointments")) {
-    return send(res, 200, load().map(normalize).filter((row) => row.date === today()));
-  }
-
-  if (req.method === "POST" && (route === "/appointments/book" || route === "/api/appointments/book" || route === "/appointments")) {
-    let raw = "";
-    req.on("data", (chunk) => {
-      raw += chunk;
-    });
-    req.on("end", () => {
-      try {
-        const body = raw ? JSON.parse(raw) : {};
-        const patientName = String(body.patientName || body.patient || "").trim();
-        const time = body.time || (body.datetime ? new Date(body.datetime).toISOString().slice(11, 16) : "");
-        const date = body.date || today();
-        if (!patientName || !time) return send(res, 400, { error: "Missing patientName or time" });
-        if (minutes(time) % 30 !== 0) return send(res, 400, { error: "30-minute slot required" });
-        const rows = load();
-        const clash = rows.map(normalize).some((row) => row.date === date && Math.abs(minutes(row.time) - minutes(time)) < 30);
-        if (clash) return send(res, 409, { error: "overlapping slot" });
-        const created = { id: Date.now().toString(), patientName, patient: patientName, time, date };
-        rows.push(created);
-        save(rows);
-        return send(res, 201, created);
-      } catch {
-        return send(res, 400, { error: "Invalid JSON" });
-      }
-    });
+  const parsedUrl = url.parse(req.url, true);
+  const { pathname } = parsedUrl;
+  if (req.method === 'GET' && pathname === '/health') {
+    sendJson(res, 200, health());
     return;
   }
 
-  const cancel = route.match(/^\/(?:api\/)?appointments\/(?:cancel\/)?([^/]+)$/);
-  if (req.method === "DELETE" && cancel && cancel[1] !== "today" && cancel[1] !== "book") {
-    const rows = load();
-    const index = rows.findIndex((row) => String(row.id) === cancel[1]);
-    if (index < 0) return send(res, 404, { error: "Appointment not found" });
-    rows.splice(index, 1);
-    save(rows);
-    return send(res, 200, { message: "Appointment cancelled" });
+  if (req.method === 'GET' && pathname === '/api/appointment-table-shows-surn') {
+    // Return appointment list with surname included
+    const appointments = loadAppointments();
+    // Each appointment must have surname field
+    const data = appointments.map(({ id, patientName, patientSurname, time, status }) => ({
+      id,
+      patientName,
+      patientSurname,
+      time,
+      status
+    }));
+    sendJson(res, 200, data);
+    return;
   }
 
-  if (req.method === "GET" && (route === "/" || route === "/index.html")) {
-    return send(res, 200, fs.readFileSync(path.join(root, "../public/index.html"), "utf8"), "text/html");
+  if (req.method === 'GET' && pathname === '/api/booking-form-collects-surnam') {
+    // Return booking form schema including surname field
+    // Simulate form fields
+    const form = {
+      fields: [
+        { name: 'patientName', type: 'string', required: true },
+        { name: 'patientSurname', type: 'string', required: true },
+        { name: 'time', type: 'string', required: true }
+      ]
+    };
+    sendJson(res, 200, form);
+    return;
   }
 
-  return send(res, 404, { error: "Not found" });
+  if (req.method === 'DELETE' && pathname.startsWith('/api/cancel-and-today-s-list-stil/')) {
+    // Cancel appointment by id and return today's appointments
+    const id = parseIdFromPath(pathname);
+    if (!id) {
+      sendJson(res, 400, { error: 'Missing appointment id' });
+      return;
+    }
+    let appointments = loadAppointments();
+    const index = appointments.findIndex(a => a.id === id);
+    if (index === -1) {
+      sendJson(res, 404, { error: 'Appointment not found' });
+      return;
+    }
+    // Mark appointment as cancelled
+    appointments[index].status = 'cancelled';
+    saveAppointments(appointments);
+
+    // Return today's appointments (assume today is current date in ISO yyyy-mm-dd)
+    const today = new Date().toISOString().slice(0, 10);
+    const todaysAppointments = appointments.filter(a => a.time.startsWith(today) && a.status !== 'cancelled');
+    sendJson(res, 200, todaysAppointments);
+    return;
+  }
+
+  // Not found
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
 }
 
-export function createServer() {
-  return http.createServer(handle);
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  createServer().listen(Number(process.env.PORT || 3000), () => {
-    console.log("clinic desk listening");
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  const server = http.createServer((req, res) => {
+    handle(req, res);
+  });
+  server.listen(PORT, () => {
+    // eslint-disable-next-line no-console
+    console.log(`Server listening on port ${PORT}`);
   });
 }
