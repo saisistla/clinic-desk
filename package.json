@@ -1,0 +1,32 @@
+{
+  "name": "clinic-frontdesk-app",
+  "version": "1.0.0",
+  "description": "A small web app for clinic front desk to manage appointments",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "lint": "eslint .",
+    "healthcheck": "node src/healthcheck.js"
+  },
+  "keywords": [
+    "clinic",
+    "appointments",
+    "frontdesk",
+    "node",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
